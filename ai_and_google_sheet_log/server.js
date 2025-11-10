@@ -10,7 +10,7 @@ const port = process.env.PORT || 3001;
 
 // ===== Gemini Client =====
 if (!process.env.GEMINI_API_KEY) {
-  console.error("❌ GEMINI_API_KEY is missing in .env");
+  console.error("GEMINI_API_KEY is missing in .env");
 }
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
