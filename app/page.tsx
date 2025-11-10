@@ -1,14 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Sidebar from "../components/Sidebar";
+import Chat from "../components/Chat";
+import HistorySidebar from "../components/HistorySidebar";
 
 type ProviderId = "openai" | "claude" | "gemini";
 
-type ChatMessage = {
-  role: "user" | "ai";
-  text: string;
-  provider: ProviderId;
-  model: string;
+type Message = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  provider?: ProviderId; // Add provider
+  model?: string;       // Add model
 };
 
 const PROVIDERS: Record<
@@ -47,310 +51,152 @@ const PROVIDERS: Record<
 
 const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "";
 
-export default function HomePage() {
-  const [provider, setProvider] = useState<ProviderId>("openai");
-  const [model, setModel] = useState<string>(
-    PROVIDERS["openai"].models[0].id
-  );
+export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      id: "1",
+      role: "assistant",
+      content: "สวัสดีครับ! ผมคือ AI Chatbot พร้อมช่วยเหลือคุณแล้วครับ มีอะไรให้ช่วยไหมครับ?",
+      provider: "openai", // Default provider for initial message
+      model: "gpt-5", // Default model for initial message
+    },
+  ]);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-  const currentModels = PROVIDERS[provider].models;
+  const [selectedProvider, setSelectedProvider] = useState<ProviderId>("openai");
+  const [selectedModel, setSelectedModel] = useState<string>(PROVIDERS["openai"].models[0].id);
 
-  function handleChangeProvider(p: ProviderId) {
-    setProvider(p);
-    setModel(PROVIDERS[p].models[0]?.id || "");
-  }
+  const handleResize = useCallback(() => {
+    const mobileBreakpoint = 1024;
+    const currentIsMobile = window.innerWidth < mobileBreakpoint;
+    setIsMobile(currentIsMobile);
 
-  async function handleSend() {
-    if (!input.trim() || !backendUrl || !model || loading) return;
+    if (currentIsMobile) {
+      setIsSidebarOpen(false);
+      setIsHistoryOpen(false);
+    } else {
+      setIsSidebarOpen(true);
+      setIsHistoryOpen(true);
+    }
+  }, []);
 
-    const text = input.trim();
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      handleResize();
+      window.addEventListener("resize", handleResize);
+
+      // Set initial model based on default provider
+      setSelectedModel(PROVIDERS[selectedProvider].models[0].id);
+
+      return () => {
+        window.removeEventListener("resize", handleResize);
+      };
+    }
+  }, [handleResize, selectedProvider]);
+
+
+  const handleSubmit = async () => {
+    if (!input.trim() || isLoading || !backendUrl) return;
+
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      role: "user",
+      content: input,
+      provider: selectedProvider,
+      model: selectedModel,
+    };
+
+    setMessages((prev) => [...prev, userMessage]);
     setInput("");
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", text, provider, model },
-    ]);
-    setLoading(true);
+    setIsLoading(true);
 
     try {
       const res = await fetch(`${backendUrl}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, model, message: text }),
+        body: JSON.stringify({ provider: selectedProvider, model: selectedModel, message: userMessage.content }),
       });
 
       const data = await res.json();
 
-      const replyText: string =
+      const aiReplyContent: string =
         typeof data.reply === "string"
           ? data.reply
-          : "No reply from backend.";
+          : "เชื่อมต่อ backend ไม่ได้ กรุณาตรวจสอบเซิร์ฟเวอร์หรือค่า NEXT_PUBLIC_BACKEND_URL";
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          text: replyText,
-          provider: (data.provider || provider) as ProviderId,
-          model: data.model || model,
-        },
-      ]);
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: aiReplyContent,
+        provider: (data.provider || selectedProvider) as ProviderId,
+        model: data.model || selectedModel,
+      };
+      setMessages((prev) => [...prev, aiMessage]);
     } catch (err) {
       console.error(err);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "ai",
-          text:
-            "เชื่อมต่อ backend ไม่ได้ กรุณาตรวจสอบเซิร์ฟเวอร์หรือค่า NEXT_PUBLIC_BACKEND_URL",
-          provider,
-          model,
-        },
-      ]);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "เกิดข้อผิดพลาดในการเชื่อมต่อกับ AI โปรดลองอีกครั้งในภายหลัง",
+        provider: selectedProvider,
+        model: selectedModel,
+      };
+      setMessages((prev) => [...prev, errorMessage]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
-  }
+  };
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "Enter" && !e.shiftKey) {
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      handleSubmit();
     }
-  }
+  };
 
   return (
-    <main
-      style={{
-        minHeight: "100vh",
-        padding: 16,
-        background: "#020817",
-        color: "#e5e7eb",
-        display: "flex",
-        justifyContent: "center",
-        fontFamily:
-          "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 960,
-          borderRadius: 16,
-          border: "1px solid #374151",
-          background: "#020817",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header */}
+    <div className="flex min-h-screen p-2 md:p-4 lg:p-4 gap-2 md:gap-4 lg:gap-4 relative" style={{backgroundColor: '#24252d'}}>
+      <Sidebar
+        isSidebarOpen={isSidebarOpen}
+        setIsSidebarOpen={setIsSidebarOpen}
+        isMobile={isMobile}
+      />
+      {isSidebarOpen && isMobile && (
         <div
-          style={{
-            padding: "10px 14px",
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 16,
-            borderBottom: "1px solid #111827",
-          }}
-        >
-          <div>
-            <div style={{ fontSize: 10, color: "#9ca3af" }}>
-              Connected to KKU IntelSphere (OpenRouter-style)
-            </div>
-            <div style={{ fontSize: 18, fontWeight: 600 }}>
-              Multi-Model Playground
-            </div>
-            <div style={{ fontSize: 9, color: "#6b7280" }}>
-              BACKEND: {backendUrl || "NEXT_PUBLIC_BACKEND_URL not set"}
-            </div>
-          </div>
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        ></div>
+      )}
 
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 4,
-              minWidth: 180,
-            }}
-          >
-            <label
-              style={{
-                fontSize: 9,
-                color: "#9ca3af",
-              }}
-            >
-              Provider
-            </label>
-            <select
-              value={provider}
-              onChange={(e) =>
-                handleChangeProvider(e.target.value as ProviderId)
-              }
-              style={{
-                padding: "4px 8px",
-                borderRadius: 8,
-                border: "1px solid #4b5563",
-                background: "#020817",
-                color: "#e5e7eb",
-                fontSize: 11,
-              }}
-            >
-              {Object.entries(PROVIDERS).map(([id, p]) => (
-                <option key={id} value={id}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
+      <Chat
+        messages={messages}
+        input={input}
+        setInput={setInput}
+        isLoading={isLoading}
+        handleSubmit={handleSubmit}
+        handleKeyPress={handleKeyPress}
+        selectedProvider={selectedProvider}
+        setSelectedProvider={setSelectedProvider}
+        selectedModel={selectedModel}
+        setSelectedModel={setSelectedModel}
+        providers={PROVIDERS}
+        backendUrl={backendUrl}
+        isSidebarOpen={isSidebarOpen}
+        setIsSidebarOpen={setIsSidebarOpen}
+        isHistoryOpen={isHistoryOpen}
+        setIsHistoryOpen={setIsHistoryOpen}
+        isMobile={isMobile}
+      />
 
-            <label
-              style={{
-                fontSize: 9,
-                color: "#9ca3af",
-              }}
-            >
-              Model
-            </label>
-            <select
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              style={{
-                padding: "4px 8px",
-                borderRadius: 8,
-                border: "1px solid #4b5563",
-                background: "#020817",
-                color: "#e5e7eb",
-                fontSize: 11,
-              }}
-            >
-              {currentModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Messages */}
-        <div
-          style={{
-            flex: 1,
-            padding: "12px 10px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            overflowY: "auto",
-            maxHeight: "70vh",
-          }}
-        >
-          {messages.length === 0 && (
-            <div style={{ fontSize: 12, color: "#6b7280" }}>
-              เลือก Provider + Model ด้านขวา แล้วเริ่มถามคำถามด้านล่างได้เลย ✨
-            </div>
-          )}
-
-          {messages.map((m, i) => (
-            <div
-              key={i}
-              style={{
-                display: "flex",
-                justifyContent:
-                  m.role === "user" ? "flex-end" : "flex-start",
-              }}
-            >
-              <div
-                style={{
-                  maxWidth: "80%",
-                  padding: "6px 8px",
-                  borderRadius:
-                    m.role === "user"
-                      ? "12px 0 12px 12px"
-                      : "0 12px 12px 12px",
-                  background:
-                    m.role === "user" ? "#4f46e5" : "#111827",
-                  border:
-                    m.role === "user"
-                      ? "1px solid #6366f1"
-                      : "1px solid #374151",
-                  fontSize: 12,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 8,
-                    opacity: 0.7,
-                    marginBottom: 2,
-                  }}
-                >
-                  {m.role === "user"
-                    ? "คุณ"
-                    : `AI · ${m.provider}/${m.model}`}
-                </div>
-                {m.text}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Input */}
-        <div
-          style={{
-            padding: "8px 10px",
-            borderTop: "1px solid #111827",
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={
-              backendUrl
-                ? "พิมพ์ข้อความที่นี่แล้วกด Enter หรือปุ่มส่ง"
-                : "กรุณาตั้งค่า NEXT_PUBLIC_BACKEND_URL"
-            }
-            style={{
-              flex: 1,
-              padding: "8px 10px",
-              borderRadius: 999,
-              border: "1px solid #4b5563",
-              background: "#020817",
-              color: "#e5e7eb",
-              fontSize: 13,
-              outline: "none",
-            }}
-          />
-          <button
-            onClick={handleSend}
-            disabled={loading || !backendUrl}
-            style={{
-              padding: "8px 14px",
-              borderRadius: 999,
-              border: "none",
-              fontSize: 12,
-              fontWeight: 500,
-              cursor:
-                loading || !backendUrl ? "not-allowed" : "pointer",
-              background:
-                loading || !backendUrl ? "#4b5563" : "#4f46e5",
-              color: "#e5e7eb",
-              boxShadow:
-                loading || !backendUrl
-                  ? "none"
-                  : "0 0 12px rgba(79,70,229,0.8)",
-            }}
-          >
-            {loading ? "กำลังส่ง..." : "ส่ง"}
-          </button>
-        </div>
-      </div>
-    </main>
+      <HistorySidebar
+        isHistoryOpen={isHistoryOpen}
+        setIsHistoryOpen={setIsHistoryOpen}
+        isMobile={isMobile}
+      />
+    </div>
   );
 }
