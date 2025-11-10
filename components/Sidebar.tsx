@@ -93,7 +93,7 @@ export default function Sidebar({
               </div>
               {(isSidebarFullyOpen || (isMobile && isSidebarOpen)) && (
                 <span className="text-white font-semibold whitespace-nowrap transition-opacity duration-300">
-                  มายด์เมิร์จ
+                  AI ISS Chatbot
                 </span>
               )}
             </div>
