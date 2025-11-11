@@ -1,4 +1,4 @@
-import express from "express"; 
+import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
@@ -14,10 +14,9 @@ if (!process.env.KKU_API_KEY) {
 
 const kku = new OpenAI({
   apiKey: process.env.KKU_API_KEY,
-  baseURL: "https://gen.ai.kku.ac.th/api/v1", // IntelSphere / OpenRouter style
+  baseURL: "https://gen.ai.kku.ac.th/api/v1",
 });
 
-// รายชื่อ provider + model ที่อนุญาต (ใช้ key KKU ยิงทั้งหมด)
 const PROVIDERS = {
   openai: {
     label: "OpenAI",
@@ -27,8 +26,8 @@ const PROVIDERS = {
       { id: "gpt-5-nano", label: "gpt-5-nano" },
       { id: "gpt-4.1", label: "gpt-4.1" },
       { id: "gpt-4.1-mini", label: "gpt-4.1-mini" },
-      { id: "gpt-4.1-nano", label: "gpt-4.1-nano" }
-    ]
+      { id: "gpt-4.1-nano", label: "gpt-4.1-nano" },
+    ],
   },
   claude: {
     label: "Claude",
@@ -36,38 +35,61 @@ const PROVIDERS = {
       { id: "claude-sonnet-4.5", label: "claude-sonnet-4.5" },
       { id: "claude-haiku-4.5", label: "claude-haiku-4.5" },
       { id: "claude-sonnet-4", label: "claude-sonnet-4" },
-      { id: "claude-3.7-sonnet", label: "claude-3.7-sonnet" }
-    ]
+      { id: "claude-3.7-sonnet", label: "claude-3.7-sonnet" },
+    ],
   },
   gemini: {
     label: "Gemini",
     models: [
       { id: "gemini-2.5-pro", label: "gemini-2.5-pro" },
       { id: "gemini-2.5-flash", label: "gemini-2.5-flash" },
-      { id: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite" }
-    ]
-  }
+      { id: "gemini-2.5-flash-lite", label: "gemini-2.5-flash-lite" },
+    ],
+  },
 };
 
-// helper: เช็คว่า provider/model ถูกต้องไหม
 function isAllowed(provider, model) {
   const p = PROVIDERS[provider];
   if (!p) return false;
   return p.models.some((m) => m.id === model);
 }
 
-app.use(cors({ origin: "http://localhost:3000" }));
+// ✅ ฟังก์ชันยิง log ไป Apps Script
+async function logToSheet({ provider, model, message, reply }) {
+  const url = process.env.APPS_SCRIPT_URL;
+  if (!url) {
+    console.warn("APPS_SCRIPT_URL is not set, skip logging.");
+    return;
+  }
+
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, model, message, reply }),
+    });
+
+    const text = await res.text();
+    console.log("📥 Sheet log response:", res.status, text);
+  } catch (err) {
+    console.error("Failed to log to Google Sheet:", String(err));
+  }
+}
+
+app.use(
+  cors({
+    origin: "http://localhost:3000",
+  })
+);
 app.use(express.json());
 
-// หน้าเช็ค backend
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.send(`
     <h2>KKU IntelSphere Multi-Model Backend</h2>
     <p>POST /api/chat with { provider, model, message }</p>
   `);
 });
 
-// main endpoint
 app.post("/api/chat", async (req, res) => {
   try {
     const { provider, model, message } = req.body;
@@ -76,7 +98,6 @@ app.post("/api/chat", async (req, res) => {
       return res.status(400).json({ error: "message is required (string)" });
     }
 
-    // ถ้า provider/model ไม่ valid → default เป็น OpenAI gpt-5
     let selectedProvider = provider || "openai";
     let selectedModel = model || "gpt-5";
 
@@ -86,7 +107,7 @@ app.post("/api/chat", async (req, res) => {
     }
 
     const completion = await kku.chat.completions.create({
-      model: selectedModel, // ตรงนี้คือ model id ที่ IntelSphere/OpenRouter map ให้
+      model: selectedModel,
       stream: false,
       messages: [
         {
@@ -99,14 +120,22 @@ app.post("/api/chat", async (req, res) => {
 
     const reply = completion.choices?.[0]?.message?.content || "";
 
-    res.json({
+    // 🔹 Log ไป Google Sheet (ไม่ให้ล้ม API หลักถ้า log พัง)
+    logToSheet({
+      provider: selectedProvider,
+      model: selectedModel,
+      message,
+      reply,
+    }).catch(() => {});
+
+    return res.json({
       reply,
       provider: selectedProvider,
       model: selectedModel,
     });
   } catch (err) {
-    console.error("KKU multi-model error:", err);
-    res.status(500).json({
+    console.error("KKU IntelSphere error:", err);
+    return res.status(500).json({
       error: "KKU IntelSphere request failed",
       detail: String(err.message || err),
     });
@@ -114,5 +143,7 @@ app.post("/api/chat", async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`KKU IntelSphere multi-model backend on http://localhost:${port}`);
+  console.log(
+    `🚀 KKU IntelSphere multi-model backend running on http://localhost:${port}`
+  );
 });
